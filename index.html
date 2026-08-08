@@ -1045,8 +1045,8 @@
        - Remplacez "213770406106" partout dans la page par votre vrai numéro WhatsApp
        - Le catalogue PRODUCTS ci-dessous n'est qu'un secours : dès que
          Supabase répond, il est remplacé par les produits de la table
-         "products" (voir supabase-setup.sql) — c'est là que tu modifies
-         prix, couleurs, tailles et photos.
+         "products" (voir supabase-setup-simple.sql) — c'est là que tu
+         modifies nom, prix, description et photo (colonne image_url).
        ===================================================================== */
     const WHATSAPP_NUMBER = '213770406106';
 
@@ -1132,23 +1132,25 @@
 
     function fmtDA(n) { return n.toLocaleString('fr-FR') + ' DA'; }
 
-    // Convertit une ligne Supabase (snake_case) vers le format utilisé par l'UI.
+    // Convertit une ligne Supabase (name/price/description/image_url) en gardant
+    // les tailles/couleurs par défaut du produit correspondant (non gérées en base).
     function productFromRow(r) {
+        const base = DEFAULT_PRODUCTS.find(p => p.id === r.id) || {};
         return {
             id: r.id,
             name: r.name,
             price: r.price,
             desc: r.description || '',
-            colors: r.colors || [],
-            sizes: (r.sizes && r.sizes.length) ? r.sizes : ['Unique'],
-            images: r.images || {},
-            icon: '📦',
-            popular: !!r.popular,
+            colors: base.colors || ['Standard'],
+            sizes: base.sizes || ['Unique'],
+            images: r.image_url ? { [(base.colors || ['Standard'])[0]]: r.image_url } : {},
+            icon: base.icon || '📦',
+            popular: !!base.popular,
         };
     }
 
     // Charge le catalogue produits depuis Supabase (table "products", gérée
-    // depuis le Table Editor : prix, couleurs, tailles, photos).
+    // depuis le Table Editor : nom, prix, description, photo).
     async function loadProductsFromSupabase() {
         if (!supabaseClient) return;
         try {
@@ -1165,51 +1167,6 @@
             }
         } catch (e) {
             console.error('Erreur chargement produits :', e);
-        }
-    }
-
-    /* ============ INVENTAIRE (stock, optionnel) ============ */
-    const LOW_STOCK_THRESHOLD = 3;
-    let inventoryMap = new Map(); // clé "productId|color|size" -> quantité
-
-    function stockKey(productId, color, size) { return productId + '|' + color + '|' + size; }
-
-    function getStock(productId, color, size) {
-        const v = inventoryMap.get(stockKey(productId, color, size));
-        return v === undefined ? null : v;
-    }
-
-    function stockBadgeHtml(qty) {
-        if (qty === null) return '';
-        if (qty <= 0) return '<span style="color:#f87171;font-size:0.72rem;font-weight:700;">Rupture</span>';
-        if (qty <= LOW_STOCK_THRESHOLD) return '<span style="color:#fbbf24;font-size:0.72rem;font-weight:700;">Stock faible (' + qty + ')</span>';
-        return '';
-    }
-
-    async function loadInventoryFromSupabase() {
-        if (!supabaseClient) return;
-        try {
-            const { data, error } = await supabaseClient.from('inventory').select('*');
-            if (error) { console.error('Erreur chargement stock :', error); return; }
-            inventoryMap = new Map();
-            (data || []).forEach(r => inventoryMap.set(stockKey(r.product_id, r.color, r.size), r.quantity));
-        } catch (e) {
-            console.error('Erreur chargement stock :', e);
-        }
-    }
-
-    // Déduit le stock côté Supabase après une commande (fonction SQL
-    // "decrement_stock" — voir supabase-setup.sql). Échec silencieux : on
-    // ne bloque jamais une commande à cause du suivi de stock.
-    async function decrementStock(productId, color, size, qty) {
-        if (!supabaseClient || !productId || !color || !size) return;
-        try {
-            const { error } = await supabaseClient.rpc('decrement_stock', {
-                p_product_id: productId, p_color: color, p_size: size, p_qty: qty
-            });
-            if (error) console.error('Erreur déduction stock :', error);
-        } catch (e) {
-            console.error('Erreur déduction stock :', e);
         }
     }
 
@@ -1413,8 +1370,6 @@
             localStorage.setItem(key, JSON.stringify(existing));
         } catch (e) { console.error('Impossible d\'enregistrer la commande localement :', e); }
 
-        cfgSaveOrderToSupabase(order);
-
         const lines = [
             'Bonjour Sisko Shop, je souhaite commander :',
             '• Référence : ' + order.id,
@@ -1439,38 +1394,10 @@
         window.open(url, '_blank');
     }
 
-    // Enregistre la commande dans Supabase (table "orders"). Échec silencieux :
-    // la commande WhatsApp part quand même, la copie locale reste en secours.
-    async function cfgSaveOrderToSupabase(order) {
-        if (!supabaseClient) return;
-        try {
-            const { error } = await supabaseClient.from('orders').insert({
-                id: order.id,
-                product_id: order.productId,
-                product: order.product,
-                price: order.price,
-                size: order.size,
-                color: order.color,
-                qty: order.qty,
-                total: order.total,
-                logo_note: order.logoNote,
-                customer_name: order.customerName,
-                phone: order.phone,
-                note: order.note,
-                status: 'nouvelle',
-            });
-            if (error) console.error('Erreur Supabase (commande) :', error);
-            else decrementStock(order.productId, order.color, order.size, order.qty);
-        } catch (err) {
-            console.error('Impossible d\'enregistrer la commande sur Supabase :', err);
-        }
-    }
-
     buildMarquee();
     buildSectors();
     renderPackGrid();
     loadProductsFromSupabase(); // remplace le catalogue par défaut dès que Supabase répond
-    loadInventoryFromSupabase(); // charge le stock (facultatif)
 </script>
 
 </body>
