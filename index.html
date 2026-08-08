@@ -808,7 +808,10 @@
 </head>
 <body>
 
-<div id="debugBanner" style="display:none; position:sticky; top:0; z-index:999; padding:10px 16px; font-size:0.85rem; font-weight:700; text-align:center;"></div>
+<div id="debugBanner" style="display:none; position:sticky; top:0; z-index:999; padding:10px 16px; font-size:0.85rem; font-weight:700; text-align:center;">
+    <span id="debugBannerText"></span>
+    <button onclick="loadProductsFromSupabase()" style="margin-left:10px; padding:4px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.5); background:transparent; color:#fff; font-weight:700; cursor:pointer; font-size:0.78rem;">🔄 Rafraîchir</button>
+</div>
 <header>
     <div class="logo"><span class="dot"></span> SISKO SHOP</div>
     <nav>
@@ -1155,37 +1158,43 @@
     // Peut être supprimé une fois que tout fonctionne (voir plus bas).
     function showDebugBanner(message, ok) {
         const el = document.getElementById('debugBanner');
-        if (!el) return;
+        const txt = document.getElementById('debugBannerText');
+        if (!el || !txt) return;
         el.style.display = 'block';
         el.style.background = ok ? '#0f5132' : '#7f1d1d';
         el.style.color = '#fff';
-        el.textContent = message;
+        txt.textContent = message;
     }
 
     // Charge le catalogue produits depuis Supabase (table "products", gérée
     // depuis le Table Editor : nom, prix, description, photo).
+    // Utilise fetch() directement (avec anti-cache) plutôt que le client
+    // supabase-js, pour être sûr de ne jamais recevoir une réponse mise en
+    // cache par un intermédiaire réseau (CDN, proxy...).
     async function loadProductsFromSupabase() {
-        if (!supabaseClient) {
-            showDebugBanner('⚠️ Supabase non initialisé (script supabase-js non chargé — vérifie ta connexion internet).', false);
-            return;
-        }
         try {
-            const { data, error } = await supabaseClient
-                .from('products')
-                .select('*')
-                .eq('active', true)
-                .order('sort_order', { ascending: true });
-            if (error) {
-                console.error('Erreur chargement produits :', error);
-                showDebugBanner('⚠️ Erreur Supabase : ' + error.message, false);
+            const url = SUPABASE_URL + '/rest/v1/products?select=*&active=eq.true&order=sort_order.asc&_=' + Date.now();
+            const res = await fetch(url, {
+                cache: 'no-store',
+                headers: {
+                    'apikey': SUPABASE_ANON_KEY,
+                    'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+                    'Cache-Control': 'no-cache',
+                }
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                console.error('Erreur chargement produits :', res.status, text);
+                showDebugBanner('⚠️ Erreur Supabase (' + res.status + ') : ' + text, false);
                 return;
             }
+            const data = await res.json();
             if (data && data.length > 0) {
                 PRODUCTS = data.map(productFromRow);
                 renderPackGrid();
                 if (typeof cfgRenderProductGrid === 'function') cfgRenderProductGrid();
                 buildMarquee();
-                showDebugBanner('✅ Connecté à Supabase — ' + data.length + ' produit(s) chargé(s) depuis la base.', true);
+                showDebugBanner('✅ Connecté à Supabase — ' + data.length + ' produit(s) chargé(s) depuis la base. (' + new Date().toLocaleTimeString('fr-FR') + ')', true);
             } else {
                 showDebugBanner('⚠️ Connecté à Supabase mais 0 produit trouvé (table vide, ou tous les produits ont "active" décoché).', false);
             }
