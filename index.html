@@ -808,6 +808,7 @@
 </head>
 <body>
 
+<div id="debugBanner" style="display:none; position:sticky; top:0; z-index:999; padding:10px 16px; font-size:0.85rem; font-weight:700; text-align:center;"></div>
 <header>
     <div class="logo"><span class="dot"></span> SISKO SHOP</div>
     <nav>
@@ -1149,24 +1150,48 @@
         };
     }
 
+    // Affiche un bandeau visible en haut de page pour diagnostiquer la
+    // connexion Supabase sans avoir besoin d'ouvrir la console (F12).
+    // Peut être supprimé une fois que tout fonctionne (voir plus bas).
+    function showDebugBanner(message, ok) {
+        const el = document.getElementById('debugBanner');
+        if (!el) return;
+        el.style.display = 'block';
+        el.style.background = ok ? '#0f5132' : '#7f1d1d';
+        el.style.color = '#fff';
+        el.textContent = message;
+    }
+
     // Charge le catalogue produits depuis Supabase (table "products", gérée
     // depuis le Table Editor : nom, prix, description, photo).
     async function loadProductsFromSupabase() {
-        if (!supabaseClient) return;
+        if (!supabaseClient) {
+            showDebugBanner('⚠️ Supabase non initialisé (script supabase-js non chargé — vérifie ta connexion internet).', false);
+            return;
+        }
         try {
             const { data, error } = await supabaseClient
                 .from('products')
                 .select('*')
                 .eq('active', true)
                 .order('sort_order', { ascending: true });
-            if (error) { console.error('Erreur chargement produits :', error); return; }
+            if (error) {
+                console.error('Erreur chargement produits :', error);
+                showDebugBanner('⚠️ Erreur Supabase : ' + error.message, false);
+                return;
+            }
             if (data && data.length > 0) {
                 PRODUCTS = data.map(productFromRow);
                 renderPackGrid();
                 if (typeof cfgRenderProductGrid === 'function') cfgRenderProductGrid();
+                buildMarquee();
+                showDebugBanner('✅ Connecté à Supabase — ' + data.length + ' produit(s) chargé(s) depuis la base.', true);
+            } else {
+                showDebugBanner('⚠️ Connecté à Supabase mais 0 produit trouvé (table vide, ou tous les produits ont "active" décoché).', false);
             }
         } catch (e) {
             console.error('Erreur chargement produits :', e);
+            showDebugBanner('⚠️ Erreur réseau/JS : ' + e.message, false);
         }
     }
 
