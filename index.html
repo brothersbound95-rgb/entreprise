@@ -1038,13 +1038,28 @@
     </svg>
 </a>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
     /* =====================================================================
        ⚠️ À FAIRE AVANT MISE EN LIGNE :
        - Remplacez "213770406106" partout dans la page par votre vrai numéro WhatsApp
-       - Adaptez le catalogue PRODUCTS ci-dessous (noms, prix, tailles, couleurs)
+       - Le catalogue PRODUCTS ci-dessous n'est qu'un secours : dès que
+         Supabase répond, il est remplacé par les produits de la table
+         "products" (voir supabase-setup.sql) — c'est là que tu modifies
+         prix, couleurs, tailles et photos.
        ===================================================================== */
     const WHATSAPP_NUMBER = '213770406106';
+
+    /* ============ SUPABASE — mêmes identifiants que le premier site ============ */
+    const SUPABASE_URL = 'https://nzxmtmbnoirgpwkenqnv.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56eG10bWJub2lyZ3B3a2VucW52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwMDk1MjcsImV4cCI6MjA5ODU4NTUyN30.Afj0RuHq4sB22feRsi9xBe0Ri60aiObKCFPenb-zfts';
+    const supabaseClient = (typeof supabase !== 'undefined')
+        ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+        : null;
+
+    // Toutes les photos produit sont hébergées dans le bucket public "image".
+    const SUPABASE_BASE = SUPABASE_URL + '/storage/v1/object/public/image/';
+    function img(filename) { return SUPABASE_BASE + encodeURIComponent(filename); }
 
     const COLOR_HEX = {
         'Bleu ciel': '#7fc8f5',
@@ -1057,59 +1072,146 @@
 
     const SECTORS = ['Commerce', 'Restauration', 'BTP & Chantiers', 'Bureaux & Services', 'Événementiel', 'Associations', 'Santé', 'Transport'];
 
-    const PRODUCTS = [
+    // Catalogue de secours (utilisé le temps que Supabase réponde, ou si la
+    // table "products" est vide). Dès que Supabase répond, PRODUCTS est
+    // remplacé par les lignes de la base — modifiables depuis le Table Editor.
+    const DEFAULT_PRODUCTS = [
         {
-            id: 'tshirt', name: 'T-Shirt Entreprise', price: 750, icon: '👕',
+            id: 'tshirt', name: 'T-Shirt Entreprise', price: 750, icon: '👕', images: {},
             desc: 'Coton unisexe, logo brodé ou imprimé. Idéal pour toutes les équipes.',
             sizes: ['XS','S','M','L','XL','XXL'],
             colors: ['Bleu ciel','Gris','Blanc','Noir','Marine'],
         },
         {
-            id: 'polo', name: 'Polo Professionnel', price: 1100, icon: '👔',
+            id: 'polo', name: 'Polo Professionnel', price: 1100, icon: '👔', images: {},
             desc: 'Col boutonné, look pro. Parfait pour l\'accueil et les bureaux.',
             sizes: ['S','M','L','XL','XXL'],
             colors: ['Bleu ciel','Gris foncé','Blanc','Marine'],
             popular: true,
         },
         {
-            id: 'casquette', name: 'Casquette Logo', price: 1200, icon: '🧢',
+            id: 'casquette', name: 'Casquette Logo', price: 1200, icon: '🧢', images: {},
             desc: 'Broderie logo à l\'avant, réglable, idéal terrain et événementiel.',
             sizes: ['Unique'],
             colors: ['Gris','Noir','Blanc'],
         },
         {
-            id: 'gilet', name: 'Gilet Haute Visibilité', price: 2000, icon: '🦺',
+            id: 'gilet', name: 'Gilet Haute Visibilité', price: 2000, icon: '🦺', images: {},
             desc: 'Sécurité chantier et logistique, floquage entreprise inclus.',
             sizes: ['S','M','L','XL'],
             colors: ['Gris','Noir'],
         },
         {
-            id: 'sweat', name: 'Sweat à Capuche', price: 1800, icon: '🧥',
+            id: 'sweat', name: 'Sweat à Capuche', price: 1800, icon: '🧥', images: {},
             desc: 'Confort et image de marque pour vos équipes toute l\'année.',
             sizes: ['S','M','L','XL','XXL'],
             colors: ['Gris foncé','Marine','Noir'],
         },
         {
-            id: 'totebag', name: 'Tote Bag Publicitaire', price: 700, icon: '🛍️',
+            id: 'totebag', name: 'Tote Bag Publicitaire', price: 700, icon: '🛍️', images: {},
             desc: 'Sac en toile personnalisable, idéal salons et cadeaux clients.',
             sizes: ['Unique'],
             colors: ['Bleu ciel','Gris','Blanc'],
         },
         {
-            id: 'tablier', name: 'Tablier Personnalisé', price: 900, icon: '🍳',
+            id: 'tablier', name: 'Tablier Personnalisé', price: 900, icon: '🍳', images: {},
             desc: 'Pour commerces, restauration et artisans, logo brodé.',
             sizes: ['Unique'],
             colors: ['Gris','Noir','Blanc'],
         },
         {
-            id: 'lanyard', name: 'Porte-Badge / Lanyard', price: 350, icon: '🪪',
+            id: 'lanyard', name: 'Porte-Badge / Lanyard', price: 350, icon: '🪪', images: {},
             desc: 'Accessoire discret aux couleurs de votre entreprise.',
             sizes: ['Unique'],
             colors: ['Bleu ciel','Gris','Noir'],
         },
     ];
 
+    // Catalogue effectif utilisé par toute la page (cartes + configurateur).
+    let PRODUCTS = DEFAULT_PRODUCTS;
+
     function fmtDA(n) { return n.toLocaleString('fr-FR') + ' DA'; }
+
+    // Convertit une ligne Supabase (snake_case) vers le format utilisé par l'UI.
+    function productFromRow(r) {
+        return {
+            id: r.id,
+            name: r.name,
+            price: r.price,
+            desc: r.description || '',
+            colors: r.colors || [],
+            sizes: (r.sizes && r.sizes.length) ? r.sizes : ['Unique'],
+            images: r.images || {},
+            icon: '📦',
+            popular: !!r.popular,
+        };
+    }
+
+    // Charge le catalogue produits depuis Supabase (table "products", gérée
+    // depuis le Table Editor : prix, couleurs, tailles, photos).
+    async function loadProductsFromSupabase() {
+        if (!supabaseClient) return;
+        try {
+            const { data, error } = await supabaseClient
+                .from('products')
+                .select('*')
+                .eq('active', true)
+                .order('sort_order', { ascending: true });
+            if (error) { console.error('Erreur chargement produits :', error); return; }
+            if (data && data.length > 0) {
+                PRODUCTS = data.map(productFromRow);
+                renderPackGrid();
+                if (typeof cfgRenderProductGrid === 'function') cfgRenderProductGrid();
+            }
+        } catch (e) {
+            console.error('Erreur chargement produits :', e);
+        }
+    }
+
+    /* ============ INVENTAIRE (stock, optionnel) ============ */
+    const LOW_STOCK_THRESHOLD = 3;
+    let inventoryMap = new Map(); // clé "productId|color|size" -> quantité
+
+    function stockKey(productId, color, size) { return productId + '|' + color + '|' + size; }
+
+    function getStock(productId, color, size) {
+        const v = inventoryMap.get(stockKey(productId, color, size));
+        return v === undefined ? null : v;
+    }
+
+    function stockBadgeHtml(qty) {
+        if (qty === null) return '';
+        if (qty <= 0) return '<span style="color:#f87171;font-size:0.72rem;font-weight:700;">Rupture</span>';
+        if (qty <= LOW_STOCK_THRESHOLD) return '<span style="color:#fbbf24;font-size:0.72rem;font-weight:700;">Stock faible (' + qty + ')</span>';
+        return '';
+    }
+
+    async function loadInventoryFromSupabase() {
+        if (!supabaseClient) return;
+        try {
+            const { data, error } = await supabaseClient.from('inventory').select('*');
+            if (error) { console.error('Erreur chargement stock :', error); return; }
+            inventoryMap = new Map();
+            (data || []).forEach(r => inventoryMap.set(stockKey(r.product_id, r.color, r.size), r.quantity));
+        } catch (e) {
+            console.error('Erreur chargement stock :', e);
+        }
+    }
+
+    // Déduit le stock côté Supabase après une commande (fonction SQL
+    // "decrement_stock" — voir supabase-setup.sql). Échec silencieux : on
+    // ne bloque jamais une commande à cause du suivi de stock.
+    async function decrementStock(productId, color, size, qty) {
+        if (!supabaseClient || !productId || !color || !size) return;
+        try {
+            const { error } = await supabaseClient.rpc('decrement_stock', {
+                p_product_id: productId, p_color: color, p_size: size, p_qty: qty
+            });
+            if (error) console.error('Erreur déduction stock :', error);
+        } catch (e) {
+            console.error('Erreur déduction stock :', e);
+        }
+    }
 
     /* ============ MARQUEE ============ */
     function buildMarquee() {
@@ -1124,12 +1226,20 @@
         document.getElementById('sectorsStrip').innerHTML = SECTORS.map(s => `<span>${s}</span>`).join('');
     }
 
+    function thumbHTML(p) {
+        const firstColor = p.colors[0];
+        const url = p.images && p.images[firstColor];
+        return url
+            ? `<img src="${url}" alt="${p.name}" style="width:100%;height:100%;object-fit:cover;">`
+            : p.icon;
+    }
+
     /* ============ PACK GRID ============ */
     function renderPackGrid() {
         const grid = document.getElementById('packGrid');
         grid.innerHTML = PRODUCTS.map(p => `
             <div class="pack ${p.popular ? 'popular' : ''}">
-                <div class="thumb">${p.icon}</div>
+                <div class="thumb">${thumbHTML(p)}</div>
                 <h3>${p.name}</h3>
                 <div class="price">${fmtDA(p.price)} <sup>/ unité</sup></div>
                 <div class="desc">${p.desc}</div>
@@ -1168,7 +1278,7 @@
         const grid = document.getElementById('cfgProductGrid');
         grid.innerHTML = PRODUCTS.map(p => `
             <div class="cfg-product-card ${cfg.productId === p.id ? 'active' : ''}" onclick="cfgSelectProduct('${p.id}')">
-                <div class="thumb-mini">${p.icon}</div>
+                <div class="thumb-mini">${thumbHTML(p)}</div>
                 <div class="name">${p.name}</div>
                 <div class="p">${fmtDA(p.price)}</div>
             </div>
@@ -1291,17 +1401,19 @@
         const order = {
             id: 'CMD-' + Date.now().toString(36).toUpperCase(),
             date: new Date().toISOString(),
-            product: p.name, price: p.price, size: cfg.size, color: cfg.color,
+            productId: p.id, product: p.name, price: p.price, size: cfg.size, color: cfg.color,
             qty: cfg.qty, total, logoNote: cfg.logoNote,
             customerName: name, phone, note,
         };
 
         try {
-            const key = 'novapro_orders';
+            const key = 'sisko_orders';
             const existing = JSON.parse(localStorage.getItem(key) || '[]');
             existing.unshift(order);
             localStorage.setItem(key, JSON.stringify(existing));
         } catch (e) { console.error('Impossible d\'enregistrer la commande localement :', e); }
+
+        cfgSaveOrderToSupabase(order);
 
         const lines = [
             'Bonjour Sisko Shop, je souhaite commander :',
@@ -1327,9 +1439,38 @@
         window.open(url, '_blank');
     }
 
+    // Enregistre la commande dans Supabase (table "orders"). Échec silencieux :
+    // la commande WhatsApp part quand même, la copie locale reste en secours.
+    async function cfgSaveOrderToSupabase(order) {
+        if (!supabaseClient) return;
+        try {
+            const { error } = await supabaseClient.from('orders').insert({
+                id: order.id,
+                product_id: order.productId,
+                product: order.product,
+                price: order.price,
+                size: order.size,
+                color: order.color,
+                qty: order.qty,
+                total: order.total,
+                logo_note: order.logoNote,
+                customer_name: order.customerName,
+                phone: order.phone,
+                note: order.note,
+                status: 'nouvelle',
+            });
+            if (error) console.error('Erreur Supabase (commande) :', error);
+            else decrementStock(order.productId, order.color, order.size, order.qty);
+        } catch (err) {
+            console.error('Impossible d\'enregistrer la commande sur Supabase :', err);
+        }
+    }
+
     buildMarquee();
     buildSectors();
     renderPackGrid();
+    loadProductsFromSupabase(); // remplace le catalogue par défaut dès que Supabase répond
+    loadInventoryFromSupabase(); // charge le stock (facultatif)
 </script>
 
 </body>
