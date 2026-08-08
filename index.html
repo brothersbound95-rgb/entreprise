@@ -1173,7 +1173,7 @@
     // cache par un intermédiaire réseau (CDN, proxy...).
     async function loadProductsFromSupabase() {
         try {
-            const url = SUPABASE_URL + '/rest/v1/products?select=*&active=eq.true&order=sort_order.asc&_=' + Date.now();
+            const url = SUPABASE_URL + '/rest/v1/products?select=*&active=eq.true&order=sort_order.asc';
             const res = await fetch(url, {
                 cache: 'no-store',
                 headers: {
