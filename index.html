@@ -338,6 +338,7 @@
         height: 18px;
         border-radius: 50%;
         border: 2px solid var(--border);
+        cursor: pointer;
     }
 
     .pack-btn {
@@ -808,10 +809,6 @@
 </head>
 <body>
 
-<div id="debugBanner" style="display:none; position:sticky; top:0; z-index:999; padding:10px 16px; font-size:0.85rem; font-weight:700; text-align:center;">
-    <span id="debugBannerText"></span>
-    <button onclick="loadProductsFromSupabase()" style="margin-left:10px; padding:4px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.5); background:transparent; color:#fff; font-weight:700; cursor:pointer; font-size:0.78rem;">🔄 Rafraîchir</button>
-</div>
 <header>
     <div class="logo"><span class="dot"></span> SISKO SHOP</div>
     <nav>
@@ -1170,21 +1167,8 @@
     // Affiche un bandeau visible en haut de page pour diagnostiquer la
     // connexion Supabase sans avoir besoin d'ouvrir la console (F12).
     // Peut être supprimé une fois que tout fonctionne (voir plus bas).
-    function showDebugBanner(message, ok) {
-        const el = document.getElementById('debugBanner');
-        const txt = document.getElementById('debugBannerText');
-        if (!el || !txt) return;
-        el.style.display = 'block';
-        el.style.background = ok ? '#0f5132' : '#7f1d1d';
-        el.style.color = '#fff';
-        txt.textContent = message;
-    }
-
     // Charge le catalogue produits depuis Supabase (table "products", gérée
     // depuis le Table Editor : nom, prix, description, photo).
-    // Utilise fetch() directement (avec anti-cache) plutôt que le client
-    // supabase-js, pour être sûr de ne jamais recevoir une réponse mise en
-    // cache par un intermédiaire réseau (CDN, proxy...).
     async function loadProductsFromSupabase() {
         try {
             const url = SUPABASE_URL + '/rest/v1/products?select=*&active=eq.true&order=sort_order.asc';
@@ -1193,13 +1177,10 @@
                 headers: {
                     'apikey': SUPABASE_ANON_KEY,
                     'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
-                    'Cache-Control': 'no-cache',
                 }
             });
             if (!res.ok) {
-                const text = await res.text();
-                console.error('Erreur chargement produits :', res.status, text);
-                showDebugBanner('⚠️ Erreur Supabase (' + res.status + ') : ' + text, false);
+                console.error('Erreur chargement produits :', res.status, await res.text());
                 return;
             }
             const data = await res.json();
@@ -1208,13 +1189,9 @@
                 renderPackGrid();
                 if (typeof cfgRenderProductGrid === 'function') cfgRenderProductGrid();
                 buildMarquee();
-                showDebugBanner('✅ Connecté à Supabase — ' + data.length + ' produit(s) chargé(s) depuis la base. (' + new Date().toLocaleTimeString('fr-FR') + ')', true);
-            } else {
-                showDebugBanner('⚠️ Connecté à Supabase mais 0 produit trouvé (table vide, ou tous les produits ont "active" décoché).', false);
             }
         } catch (e) {
             console.error('Erreur chargement produits :', e);
-            showDebugBanner('⚠️ Erreur réseau/JS : ' + e.message, false);
         }
     }
 
@@ -1244,16 +1221,27 @@
         const grid = document.getElementById('packGrid');
         grid.innerHTML = PRODUCTS.map(p => `
             <div class="pack ${p.popular ? 'popular' : ''}">
-                <div class="thumb">${thumbHTML(p)}</div>
+                <div class="thumb" id="thumb-${p.id}">${thumbHTML(p)}</div>
                 <h3>${p.name}</h3>
                 <div class="price">${fmtDA(p.price)} <sup>/ unité</sup></div>
                 <div class="desc">${p.desc}</div>
                 <div class="swatch-preview">
-                    ${p.colors.map(c => `<span class="sw" style="background:${COLOR_HEX[c] || '#888'}"></span>`).join('')}
+                    ${p.colors.map(c => `<span class="sw" style="background:${COLOR_HEX[c] || '#888'}" title="${c}" onclick="previewPackColor('${p.id}','${c}')"></span>`).join('')}
                 </div>
                 <button class="pack-btn" onclick="openConfigurator('${p.id}')">Configurer &amp; commander</button>
             </div>
         `).join('');
+    }
+
+    // Change la photo affichée sur la carte quand on clique une pastille couleur.
+    function previewPackColor(productId, color) {
+        const p = PRODUCTS.find(x => x.id === productId);
+        const el = document.getElementById('thumb-' + productId);
+        if (!p || !el) return;
+        const url = p.images && p.images[color];
+        el.innerHTML = url
+            ? `<img src="${url}" alt="${p.name} ${color}" style="width:100%;height:100%;object-fit:cover;">`
+            : p.icon;
     }
 
     /* ============ CONFIGURATOR STATE ============ */
